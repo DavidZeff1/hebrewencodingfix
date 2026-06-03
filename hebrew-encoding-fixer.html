@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מתקן קידוד עברית · Hebrew Encoding Fixer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --ink: #0d1b2a;
+    --paper: #f4ede4;
+    --paper-deep: #e8ddcd;
+    --rust: #c1440e;
+    --rust-deep: #9a3409;
+    --teal: #1d6a6a;
+    --gold: #d4a017;
+    --shadow: rgba(13,27,42,0.18);
+    --line: rgba(13,27,42,0.12);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Heebo', sans-serif;
+    background: var(--paper);
+    background-image:
+      radial-gradient(circle at 15% 20%, rgba(193,68,14,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 85% 80%, rgba(29,106,106,0.05) 0%, transparent 45%),
+      url("data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%230d1b2a' fill-opacity='0.025'%3E%3Cpath d='M0 0h40v40H0zM40 40h40v40H40z'/%3E%3C/g%3E%3C/svg%3E");
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 3rem 1.5rem;
+    overflow-x: hidden;
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  header { text-align: center; margin-bottom: 2.5rem; position: relative; }
+
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: var(--rust);
+    margin-bottom: 0.8rem;
+    direction: ltr;
+  }
+
+  h1 {
+    font-family: 'Frank Ruhl Libre', serif;
+    font-weight: 900;
+    font-size: clamp(2.4rem, 7vw, 3.8rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.6rem;
+  }
+  h1 .gib {
+    color: var(--paper-deep);
+    background: var(--ink);
+    padding: 0 0.15em;
+    transform: skew(-4deg);
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8em;
+  }
+  h1 .fix { color: var(--rust); }
+
+  .sub {
+    font-size: 0.98rem;
+    color: rgba(13,27,42,0.65);
+    max-width: 46ch;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  /* Drop zone */
+  .drop {
+    position: relative;
+    border: 2.5px dashed var(--line);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.4);
+    padding: 3.2rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.2,0.8,0.2,1);
+    margin-bottom: 1.5rem;
+    box-shadow: 6px 6px 0 var(--shadow);
+  }
+  .drop::before {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    pointer-events: none;
+    opacity: 0.5;
+  }
+  .drop:hover {
+    border-color: var(--rust);
+    background: rgba(255,255,255,0.7);
+    transform: translate(-2px,-2px);
+    box-shadow: 8px 8px 0 var(--shadow);
+  }
+  .drop.over {
+    border-color: var(--teal);
+    border-style: solid;
+    background: rgba(29,106,106,0.06);
+    transform: scale(0.99);
+  }
+  .drop-icon {
+    font-family: 'Frank Ruhl Libre', serif;
+    font-size: 3.2rem;
+    color: var(--rust);
+    margin-bottom: 0.8rem;
+    line-height: 1;
+  }
+  .drop-main { font-weight: 700; font-size: 1.15rem; margin-bottom: 0.3rem; }
+  .drop-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: rgba(13,27,42,0.5);
+    direction: ltr;
+    letter-spacing: 0.05em;
+  }
+  input[type=file] { display: none; }
+
+  /* Encoding picker */
+  .controls {
+    display: none;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .controls.show { display: flex; }
+  .field { flex: 1; min-width: 200px; }
+  .field label {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin-bottom: 0.4rem;
+  }
+  select {
+    width: 100%;
+    font-family: 'Heebo', sans-serif;
+    font-size: 0.95rem;
+    padding: 0.7rem 0.9rem;
+    border: 2px solid var(--ink);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+    box-shadow: 3px 3px 0 var(--shadow);
+  }
+  select:focus { outline: none; border-color: var(--rust); }
+
+  /* Preview */
+  .preview {
+    display: none;
+    background: #fff;
+    border: 2px solid var(--ink);
+    border-radius: 3px;
+    margin-bottom: 1.5rem;
+    box-shadow: 6px 6px 0 var(--shadow);
+    overflow: hidden;
+  }
+  .preview.show { display: block; }
+  .preview-head {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.7rem 1.1rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    direction: ltr;
+  }
+  .preview-head .badge {
+    background: var(--gold);
+    color: var(--ink);
+    padding: 0.1rem 0.5rem;
+    border-radius: 2px;
+    font-weight: 500;
+  }
+  .table-scroll { overflow-x: auto; max-height: 320px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 0.45rem 0.7rem;
+    text-align: right;
+    white-space: nowrap;
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  thead th {
+    background: var(--paper-deep);
+    font-weight: 700;
+    position: sticky;
+    top: 0;
+  }
+  tbody tr:nth-child(even) { background: rgba(244,237,228,0.5); }
+
+  /* Buttons */
+  .actions { display: none; gap: 0.8rem; flex-wrap: wrap; }
+  .actions.show { display: flex; }
+  button.btn {
+    font-family: 'Heebo', sans-serif;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 0.9rem 1.6rem;
+    border: 2px solid var(--ink);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    box-shadow: 4px 4px 0 var(--ink);
+    flex: 1;
+    min-width: 180px;
+  }
+  button.btn:hover { transform: translate(-2px,-2px); box-shadow: 6px 6px 0 var(--ink); }
+  button.btn:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 var(--ink); }
+  .btn-csv { background: var(--rust); color: #fff; }
+  .btn-xlsx { background: var(--teal); color: #fff; }
+  .btn-reset { background: #fff; color: var(--ink); flex: 0; min-width: 120px; }
+
+  /* Status / error */
+  .status {
+    margin-top: 1.2rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    padding: 0.8rem 1rem;
+    border-radius: 3px;
+    display: none;
+    direction: ltr;
+    text-align: left;
+  }
+  .status.show { display: block; }
+  .status.err { background: rgba(193,68,14,0.12); color: var(--rust-deep); border: 1px solid var(--rust); }
+  .status.ok { background: rgba(29,106,106,0.1); color: var(--teal); border: 1px solid var(--teal); }
+
+  footer {
+    margin-top: 3rem;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: rgba(13,27,42,0.4);
+    line-height: 1.7;
+    direction: ltr;
+  }
+  footer .note { max-width: 52ch; margin: 0 auto; }
+
+  @keyframes pop { from { opacity:0; transform: translateY(12px);} to {opacity:1; transform:none;} }
+  .preview.show, .controls.show, .actions.show { animation: pop 0.35s ease both; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Mojibake → תקין</div>
+    <h1>מתקן <span class="gib">×—×‘×¨×”</span> <span class="fix">קידוד</span></h1>
+    <p class="sub">גוררים קובץ Excel או CSV שבו העברית הפכה לג'יבריש. הכלי מזהה את הקידוד, מתקן אותו, ומחזיר קובץ נקי שנפתח כמו שצריך באקסל.</p>
+  </header>
+
+  <div class="drop" id="drop">
+    <div class="drop-icon">⇩</div>
+    <div class="drop-main">גררו לכאן קובץ · או לחצו לבחירה</div>
+    <div class="drop-sub">.csv · .xlsx · .xls · .txt</div>
+    <input type="file" id="file" accept=".csv,.xlsx,.xls,.txt,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+  </div>
+
+  <div class="controls" id="controls">
+    <div class="field">
+      <label>קידוד מקור — Source encoding</label>
+      <select id="encoding">
+        <option value="auto">זיהוי אוטומטי · Auto-detect</option>
+        <option value="windows-1255">Windows-1255 (Hebrew)</option>
+        <option value="ISO-8859-8">ISO-8859-8 (Hebrew)</option>
+        <option value="utf-8">UTF-8</option>
+        <option value="utf-8-as-1252">UTF-8 קרא כ-Windows-1252 (mojibake)</option>
+        <option value="utf-8-as-1255">UTF-8 קרא כ-Windows-1255</option>
+        <option value="cp862">CP862 (DOS Hebrew)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>מפריד CSV — Delimiter</label>
+      <select id="delimiter">
+        <option value="auto">זיהוי אוטומטי · Auto</option>
+        <option value=",">פסיק ( , )</option>
+        <option value=";">נקודה-פסיק ( ; )</option>
+        <option value="\t">טאב ( Tab )</option>
+        <option value="|">קו אנכי ( | )</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="preview" id="preview">
+    <div class="preview-head">
+      <span id="preview-info">PREVIEW</span>
+      <span class="badge" id="detected-badge"></span>
+    </div>
+    <div class="table-scroll"><table id="table"></table></div>
+  </div>
+
+  <div class="actions" id="actions">
+    <button class="btn btn-csv" id="dl-csv">⤓ הורד CSV נקי (UTF-8)</button>
+    <button class="btn btn-xlsx" id="dl-xlsx">⤓ הורד Excel (.xlsx)</button>
+    <button class="btn btn-reset" id="reset">נקה</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <footer>
+    <p class="note">הכל רץ מקומית בדפדפן שלך — שום קובץ לא נשלח לשרת. · Everything runs locally in your browser. No file leaves your machine.</p>
+  </footer>
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const drop = $('drop'), fileInput = $('file'), controls = $('controls'),
+        preview = $('preview'), actions = $('actions'), status = $('status'),
+        table = $('table'), encSel = $('encoding'), delimSel = $('delimiter'),
+        detectedBadge = $('detected-badge'), previewInfo = $('preview-info');
+
+  let rawBytes = null;       // Uint8Array of original file
+  let originalName = '';
+  let isExcel = false;
+  let currentRows = [];      // parsed 2D array
+  let workbookSheet = null;  // for xlsx-origin files
+
+  // ---- Hebrew detection heuristics ----
+  // Hebrew Unicode block: U+0590–U+05FF
+  function hebrewScore(str){
+    let heb = 0, gib = 0, total = 0;
+    for (const ch of str){
+      const c = ch.codePointAt(0);
+      if (c >= 0x0590 && c <= 0x05FF) heb++;
+      // common mojibake artifacts: ×, Ã, Â, replacement char, high-latin noise
+      if (c === 0xFFFD || ch === '×' || ch === 'Ã' || ch === 'Â' || ch === 'Ø' || ch === 'Ù') gib++;
+      if (c > 32) total++;
+    }
+    return { heb, gib, total };
+  }
+
+  // Decode bytes with a given encoding label, return string (or null on failure)
+  function decode(bytes, label){
+    try {
+      const dec = new TextDecoder(label, { fatal: false });
+      return dec.decode(bytes);
+    } catch(e){ return null; }
+  }
+
+  // Re-encode a mojibake string: text was UTF-8 but read as `wrongLabel`.
+  // We reverse it: take the string, map each char back to its byte in wrongLabel, then decode as UTF-8.
+  function fixMojibake(bytes, wrongLabel){
+    // bytes are the true UTF-8 bytes; the "wrong" reading happens at display.
+    // Here we instead get the wrong string then reverse — but since we hold raw bytes,
+    // the real fix is: the file was SAVED as UTF-8, so just decode as UTF-8.
+    // The "utf-8-as-X" options handle files where UTF-8 bytes were RE-SAVED through a 1-byte codec.
+    const wrong = decode(bytes, wrongLabel);
+    if (wrong === null) return null;
+    // map each char's code point (0..255 expected) back to a byte
+    const out = new Uint8Array(wrong.length);
+    for (let i=0;i<wrong.length;i++){
+      const c = wrong.charCodeAt(i);
+      out[i] = c & 0xFF;
+    }
+    return decode(out, 'utf-8');
+  }
+
+  // Try a battery of encodings, score each, pick the best for Hebrew text.
+  function autoDecode(bytes){
+    const candidates = [
+      ['utf-8', () => decode(bytes,'utf-8')],
+      ['windows-1255', () => decode(bytes,'windows-1255')],
+      ['ISO-8859-8', () => decode(bytes,'iso-8859-8')],
+      ['cp862', () => decode(bytes,'ibm862')],
+      ['utf-8-as-1252', () => fixMojibake(bytes,'windows-1252')],
+      ['utf-8-as-1255', () => fixMojibake(bytes,'windows-1255')],
+    ];
+    let best = null, bestScore = -Infinity;
+    for (const [name, fn] of candidates){
+      const str = fn();
+      if (str === null) continue;
+      const s = hebrewScore(str);
+      // reward Hebrew letters, penalise gibberish artifacts heavily
+      const score = s.heb * 3 - s.gib * 5;
+      if (score > bestScore){ bestScore = score; best = { name, str }; }
+    }
+    return best || { name: 'utf-8', str: decode(bytes,'utf-8') || '' };
+  }
+
+  function manualDecode(bytes, choice){
+    switch(choice){
+      case 'windows-1255': return { name:'windows-1255', str: decode(bytes,'windows-1255') };
+      case 'ISO-8859-8':   return { name:'ISO-8859-8', str: decode(bytes,'iso-8859-8') };
+      case 'utf-8':        return { name:'utf-8', str: decode(bytes,'utf-8') };
+      case 'cp862':        return { name:'cp862', str: decode(bytes,'ibm862') };
+      case 'utf-8-as-1252':return { name:'utf-8-as-1252', str: fixMojibake(bytes,'windows-1252') };
+      case 'utf-8-as-1255':return { name:'utf-8-as-1255', str: fixMojibake(bytes,'windows-1255') };
+      default:             return autoDecode(bytes);
+    }
+  }
+
+  // ---- CSV parsing (handles quotes, embedded newlines, chosen delimiter) ----
+  function detectDelimiter(text){
+    const sample = text.split(/\r?\n/).slice(0,5).join('\n');
+    const counts = { ',': 0, ';': 0, '\t': 0, '|': 0 };
+    for (const ch of sample){ if (ch in counts) counts[ch]++; }
+    let best = ',', max = -1;
+    for (const d in counts){ if (counts[d] > max){ max = counts[d]; best = d; } }
+    return best;
+  }
+
+  function parseCSV(text, delim){
+    if (delim === 'auto') delim = detectDelimiter(text);
+    if (delim === '\\t') delim = '\t';
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    for (let i=0;i<text.length;i++){
+      const c = text[i], next = text[i+1];
+      if (inQuotes){
+        if (c === '"' && next === '"'){ field += '"'; i++; }
+        else if (c === '"'){ inQuotes = false; }
+        else { field += c; }
+      } else {
+        if (c === '"'){ inQuotes = true; }
+        else if (c === delim){ row.push(field); field = ''; }
+        else if (c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+        else if (c === '\r'){ /* skip, handled by \n */ }
+        else { field += c; }
+      }
+    }
+    if (field.length > 0 || row.length > 0){ row.push(field); rows.push(row); }
+    // strip trailing fully-empty row
+    while (rows.length && rows[rows.length-1].every(c => c==='')) rows.pop();
+    return rows;
+  }
+
+  // ---- Render ----
+  function renderTable(rows){
+    table.innerHTML = '';
+    if (!rows.length){ return; }
+    const maxRows = 50;
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    rows[0].forEach(h => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
+    thead.appendChild(htr); table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    rows.slice(1, maxRows+1).forEach(r => {
+      const tr = document.createElement('tr');
+      for (let i=0;i<rows[0].length;i++){ const td = document.createElement('td'); td.textContent = r[i] ?? ''; tr.appendChild(td); }
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    previewInfo.textContent = `PREVIEW · ${rows.length} rows × ${rows[0].length} cols` + (rows.length>maxRows ? ` (showing ${maxRows})` : '');
+  }
+
+  function showStatus(msg, type){
+    status.textContent = msg;
+    status.className = 'status show ' + (type||'ok');
+  }
+  function hideStatus(){ status.className = 'status'; }
+
+  // ---- Main processing ----
+  function process(){
+    if (!rawBytes) return;
+    hideStatus();
+    try {
+      if (isExcel){
+        // Excel files store text internally; encoding issues are rare, but we re-read fresh.
+        const wb = XLSX.read(rawBytes, { type:'array' });
+        const first = wb.SheetNames[0];
+        workbookSheet = wb.Sheets[first];
+        currentRows = XLSX.utils.sheet_to_json(workbookSheet, { header:1, defval:'', raw:false });
+        detectedBadge.textContent = 'XLSX · ' + first;
+      } else {
+        const choice = encSel.value;
+        const decoded = manualDecode(rawBytes, choice);
+        if (!decoded || decoded.str === null){
+          showStatus('Could not decode with the chosen encoding. Try another option.', 'err');
+          return;
+        }
+        currentRows = parseCSV(decoded.str, delimSel.value);
+        detectedBadge.textContent = (choice === 'auto' ? 'AUTO → ' : '') + decoded.name;
+      }
+      renderTable(currentRows);
+      preview.classList.add('show');
+      actions.classList.add('show');
+
+      // sanity check: did we actually recover Hebrew?
+      const flat = currentRows.flat().join('');
+      const s = hebrewScore(flat);
+      if (s.heb === 0 && s.gib > 0){
+        showStatus('Still looks garbled — try a different source encoding from the dropdown above.', 'err');
+      } else if (s.heb > 0){
+        showStatus('✓ Hebrew recovered. Download a clean copy below.', 'ok');
+      }
+    } catch(e){
+      showStatus('Error: ' + e.message, 'err');
+    }
+  }
+
+  // ---- File intake ----
+  function handleFile(file){
+    originalName = file.name.replace(/\.[^.]+$/, '');
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    isExcel = (ext === 'xlsx' || ext === 'xls');
+    const reader = new FileReader();
+    reader.onload = e => {
+      rawBytes = new Uint8Array(e.target.result);
+      controls.classList.toggle('show', !isExcel); // encoding controls only matter for text files
+      if (isExcel) controls.classList.add('show'); // keep delimiter hidden but show nothing extra — actually hide
+      controls.classList.toggle('show', !isExcel);
+      process();
+    };
+    reader.onerror = () => showStatus('Could not read the file.', 'err');
+    reader.readAsArrayBuffer(file);
+  }
+
+  // ---- Downloads ----
+  function buildCSV(rows){
+    const esc = v => {
+      v = (v ?? '').toString();
+      if (/[",\n\r]/.test(v)) return '"' + v.replace(/"/g,'""') + '"';
+      return v;
+    };
+    return rows.map(r => r.map(esc).join(',')).join('\r\n');
+  }
+  function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  }
+
+  $('dl-csv').addEventListener('click', () => {
+    if (!currentRows.length) return;
+    const csv = buildCSV(currentRows);
+    // UTF-8 BOM so Excel opens Hebrew correctly
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csv], { type:'text/csv;charset=utf-8;' });
+    downloadBlob(blob, originalName + '_fixed.csv');
+  });
+
+  $('dl-xlsx').addEventListener('click', () => {
+    if (!currentRows.length) return;
+    const ws = XLSX.utils.aoa_to_sheet(currentRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    XLSX.writeFile(wb, originalName + '_fixed.xlsx');
+  });
+
+  $('reset').addEventListener('click', () => {
+    rawBytes = null; currentRows = []; originalName=''; fileInput.value='';
+    preview.classList.remove('show'); actions.classList.remove('show');
+    controls.classList.remove('show'); hideStatus();
+    detectedBadge.textContent=''; table.innerHTML='';
+  });
+
+  // re-process when user changes encoding / delimiter
+  encSel.addEventListener('change', process);
+  delimSel.addEventListener('change', process);
+
+  // ---- Drag & drop wiring ----
+  drop.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation(); drop.classList.add('over');
+  }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault(); e.stopPropagation();
+    if (ev === 'dragleave' && drop.contains(e.relatedTarget)) return;
+    drop.classList.remove('over');
+  }));
+  drop.addEventListener('drop', e => {
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+
+  // prevent browser opening file on accidental drop outside zone
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
