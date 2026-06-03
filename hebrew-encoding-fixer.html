@@ -425,38 +425,54 @@
   // (wrongLabel) and then re-saved as UTF-8. We read the file back as UTF-8 to get
   // the mojibake characters, map each one to the original codec byte, then decode
   // those recovered bytes as UTF-8 to get the real Hebrew back.
+  // The output is built into a growable Uint8Array, NOT a plain array: a regular
+  // array filled with push() throws "Invalid array length" once it passes ~134M
+  // elements (V8's fast backing-store cap), which large files (tens of MB) exceed.
   function fixMojibake(bytes, wrongLabel){
     const moji = decode(bytes, 'utf-8');
     if (moji === null) return null;
     const rev = REVERSE[wrongLabel];
     if (!rev) return null;
-    const out = [];
+    let out = new Uint8Array(moji.length + 16), n = 0;
+    const ensure = need => {
+      if (n + need <= out.length) return;
+      let cap = out.length;
+      while (cap < n + need) cap *= 2;
+      const bigger = new Uint8Array(cap);
+      bigger.set(out.subarray(0, n));
+      out = bigger;
+    };
     for (const ch of moji){
       const b = rev.get(ch);
-      if (b !== undefined) out.push(b);                        // recovered original byte
-      else for (const u of _utf8enc.encode(ch)) out.push(u);   // leave anything else intact
+      if (b !== undefined){ ensure(1); out[n++] = b; }                            // recovered original byte
+      else { ensure(4); n += _utf8enc.encodeInto(ch, out.subarray(n)).written; }  // leave anything else intact
     }
-    return decode(new Uint8Array(out), 'utf-8');
+    return decode(out.subarray(0, n), 'utf-8');
   }
 
   // Try a battery of encodings, score each, pick the best for Hebrew text.
+  // Detection runs on a sample only (a few hundred KB is plenty to identify the
+  // encoding); the winner is then decoded over the whole file. This keeps large
+  // files fast and avoids decoding the entire input six times over.
   function autoDecode(bytes){
+    const sample = bytes.length > 262144 ? bytes.subarray(0, 262144) : bytes;
     const candidates = [
-      ['utf-8', () => decode(bytes,'utf-8')],
-      ['windows-1255', () => decode(bytes,'windows-1255')],
-      ['ISO-8859-8', () => decode(bytes,'iso-8859-8')],
-      ['cp862', () => decode(bytes,'ibm862')],
-      ['utf-8-as-1252', () => fixMojibake(bytes,'windows-1252')],
-      ['utf-8-as-1255', () => fixMojibake(bytes,'windows-1255')],
+      ['utf-8', b => decode(b,'utf-8')],
+      ['windows-1255', b => decode(b,'windows-1255')],
+      ['ISO-8859-8', b => decode(b,'iso-8859-8')],
+      ['cp862', b => decode(b,'ibm862')],
+      ['utf-8-as-1252', b => fixMojibake(b,'windows-1252')],
+      ['utf-8-as-1255', b => fixMojibake(b,'windows-1255')],
     ];
-    let best = null, bestScore = -Infinity;
+    let best = 'utf-8', bestScore = -Infinity;
     for (const [name, fn] of candidates){
-      const str = fn();
+      const str = fn(sample);
       if (str === null) continue;
       const score = hebrewScore(str).value;
-      if (score > bestScore){ bestScore = score; best = { name, str }; }
+      if (score > bestScore){ bestScore = score; best = name; }
     }
-    return best || { name: 'utf-8', str: decode(bytes,'utf-8') || '' };
+    const fn = candidates.find(c => c[0] === best)[1];
+    return { name: best, str: fn(bytes) ?? '' };
   }
 
   function manualDecode(bytes, choice){
@@ -570,8 +586,8 @@
       preview.classList.add('show');
       actions.classList.add('show');
 
-      // sanity check: did we actually recover Hebrew?
-      const flat = currentRows.flat().join('');
+      // sanity check (sample of rows): did we actually recover Hebrew?
+      const flat = currentRows.slice(0, 2000).flat().join('');
       const s = hebrewScore(flat);
       if (s.letters === 0 && (s.gib > 0 || s.punct > 0)){
         showStatus('Still looks garbled — try a different source encoding from the dropdown above.', 'err');
