@@ -246,6 +246,34 @@
   .status.err { background: rgba(193,68,14,0.12); color: var(--rust-deep); border: 1px solid var(--rust); }
   .status.ok { background: rgba(29,106,106,0.1); color: var(--teal); border: 1px solid var(--teal); }
 
+  /* Loading */
+  .loading {
+    display: none;
+    align-items: center;
+    gap: 1rem;
+    background: #fff;
+    border: 2px solid var(--ink);
+    border-radius: 3px;
+    padding: 1.1rem 1.3rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 6px 6px 0 var(--shadow);
+  }
+  .loading.show { display: flex; animation: pop 0.2s ease both; }
+  .spinner {
+    width: 26px; height: 26px; flex: 0 0 auto;
+    border: 3px solid var(--paper-deep);
+    border-top-color: var(--rust);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    letter-spacing: 0.06em;
+    color: var(--teal);
+  }
+
   footer {
     margin-top: 3rem;
     text-align: center;
@@ -301,6 +329,11 @@
     </div>
   </div>
 
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text">מפענח את הקובץ… · Decoding file</div>
+  </div>
+
   <div class="preview" id="preview">
     <div class="preview-head">
       <span id="preview-info">PREVIEW</span>
@@ -328,7 +361,8 @@
   const drop = $('drop'), fileInput = $('file'), controls = $('controls'),
         preview = $('preview'), actions = $('actions'), status = $('status'),
         table = $('table'), encSel = $('encoding'), delimSel = $('delimiter'),
-        detectedBadge = $('detected-badge'), previewInfo = $('preview-info');
+        detectedBadge = $('detected-badge'), previewInfo = $('preview-info'),
+        loading = $('loading');
 
   let rawBytes = null;       // Uint8Array of original file
   let originalName = '';
@@ -338,16 +372,24 @@
 
   // ---- Hebrew detection heuristics ----
   // Hebrew Unicode block: U+0590–U+05FF
+  // Score how "Hebrew" a decoded string looks. We count real consonants positively
+  // and penalise the tell-tale signs of a wrong decode: replacement chars, the ×/Ã/Ø
+  // mojibake letters, smart-quote/dash noise, and stray niqqud/cantillation marks
+  // (which a wrong single-byte decode sprays everywhere but real data rarely has).
   function hebrewScore(str){
-    let heb = 0, gib = 0, total = 0;
+    let letters = 0, marks = 0, gib = 0, punct = 0, total = 0;
     for (const ch of str){
       const c = ch.codePointAt(0);
-      if (c >= 0x0590 && c <= 0x05FF) heb++;
-      // common mojibake artifacts: ×, Ã, Â, replacement char, high-latin noise
-      if (c === 0xFFFD || ch === '×' || ch === 'Ã' || ch === 'Â' || ch === 'Ø' || ch === 'Ù') gib++;
+      if (c >= 0x05D0 && c <= 0x05EA) letters++;          // Hebrew consonants א–ת
+      else if (c >= 0x05F0 && c <= 0x05F4) letters++;     // yod/vav ligatures, geresh
+      else if (c >= 0x0591 && c <= 0x05C7) marks++;       // niqqud / cantillation
+      if (c === 0xFFFD || c === 0x00D7 || c === 0x00C3 || c === 0x00C2 ||
+          c === 0x00D8 || c === 0x00D9 || c === 0x00DE || c === 0x00F0 ||
+          c === 0x00FE || (c >= 0x00A2 && c <= 0x00BF)) gib++;
+      if ((c >= 0x2010 && c <= 0x2027) || (c >= 0x00A0 && c <= 0x00BF)) punct++;
       if (c > 32) total++;
     }
-    return { heb, gib, total };
+    return { letters, marks, gib, punct, total, value: letters*4 - gib*6 - marks*4 - punct*3 };
   }
 
   // Decode bytes with a given encoding label, return string (or null on failure)
@@ -358,22 +400,43 @@
     } catch(e){ return null; }
   }
 
-  // Re-encode a mojibake string: text was UTF-8 but read as `wrongLabel`.
-  // We reverse it: take the string, map each char back to its byte in wrongLabel, then decode as UTF-8.
-  function fixMojibake(bytes, wrongLabel){
-    // bytes are the true UTF-8 bytes; the "wrong" reading happens at display.
-    // Here we instead get the wrong string then reverse — but since we hold raw bytes,
-    // the real fix is: the file was SAVED as UTF-8, so just decode as UTF-8.
-    // The "utf-8-as-X" options handle files where UTF-8 bytes were RE-SAVED through a 1-byte codec.
-    const wrong = decode(bytes, wrongLabel);
-    if (wrong === null) return null;
-    // map each char's code point (0..255 expected) back to a byte
-    const out = new Uint8Array(wrong.length);
-    for (let i=0;i<wrong.length;i++){
-      const c = wrong.charCodeAt(i);
-      out[i] = c & 0xFF;
+  // Build a char->byte reverse map for a single-byte codec by probing every byte
+  // 0x00..0xFF. We need this because cp1252/cp1255 map some bytes (0x80-0x9F) to
+  // characters whose code points are > 255 (smart quotes, dashes …), so the naive
+  // "code point & 0xFF" loses them — and those bytes are exactly the second byte of
+  // most Hebrew letters in UTF-8.
+  function buildReverseMap(label){
+    const m = new Map(), one = new Uint8Array(1);
+    for (let b = 0; b < 256; b++){
+      one[0] = b;
+      const ch = decode(one, label);
+      if (ch === '�') continue;     // undefined byte — not reversible
+      if (!m.has(ch)) m.set(ch, b);      // first byte wins for any duplicate mapping
     }
-    return decode(out, 'utf-8');
+    return m;
+  }
+  const REVERSE = {
+    'windows-1252': buildReverseMap('windows-1252'),
+    'windows-1255': buildReverseMap('windows-1255'),
+  };
+  const _utf8enc = new TextEncoder();
+
+  // Reverse mojibake: genuine UTF-8 text was mis-decoded through a 1-byte codec
+  // (wrongLabel) and then re-saved as UTF-8. We read the file back as UTF-8 to get
+  // the mojibake characters, map each one to the original codec byte, then decode
+  // those recovered bytes as UTF-8 to get the real Hebrew back.
+  function fixMojibake(bytes, wrongLabel){
+    const moji = decode(bytes, 'utf-8');
+    if (moji === null) return null;
+    const rev = REVERSE[wrongLabel];
+    if (!rev) return null;
+    const out = [];
+    for (const ch of moji){
+      const b = rev.get(ch);
+      if (b !== undefined) out.push(b);                        // recovered original byte
+      else for (const u of _utf8enc.encode(ch)) out.push(u);   // leave anything else intact
+    }
+    return decode(new Uint8Array(out), 'utf-8');
   }
 
   // Try a battery of encodings, score each, pick the best for Hebrew text.
@@ -390,9 +453,7 @@
     for (const [name, fn] of candidates){
       const str = fn();
       if (str === null) continue;
-      const s = hebrewScore(str);
-      // reward Hebrew letters, penalise gibberish artifacts heavily
-      const score = s.heb * 3 - s.gib * 5;
+      const score = hebrewScore(str).value;
       if (score > bestScore){ bestScore = score; best = { name, str }; }
     }
     return best || { name: 'utf-8', str: decode(bytes,'utf-8') || '' };
@@ -432,7 +493,9 @@
         else if (c === '"'){ inQuotes = false; }
         else { field += c; }
       } else {
-        if (c === '"'){ inQuotes = true; }
+        // Only treat a quote as field-opening at the very start of a field; a bare
+        // quote mid-field (common in Hebrew data, e.g. חברה בע"מ) is a literal char.
+        if (c === '"' && field === ''){ inQuotes = true; }
         else if (c === delim){ row.push(field); field = ''; }
         else if (c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
         else if (c === '\r'){ /* skip, handled by \n */ }
@@ -469,6 +532,17 @@
     status.className = 'status show ' + (type||'ok');
   }
   function hideStatus(){ status.className = 'status'; }
+  function showLoading(){ loading.classList.add('show'); }
+  function hideLoading(){ loading.classList.remove('show'); }
+  // Show the spinner, let the browser paint one frame, THEN run the synchronous
+  // decode/parse so the UI shows feedback instead of freezing on large files.
+  function runProcess(){
+    if (!rawBytes) return;
+    showLoading();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try { process(); } finally { hideLoading(); }
+    }));
+  }
 
   // ---- Main processing ----
   function process(){
@@ -499,9 +573,9 @@
       // sanity check: did we actually recover Hebrew?
       const flat = currentRows.flat().join('');
       const s = hebrewScore(flat);
-      if (s.heb === 0 && s.gib > 0){
+      if (s.letters === 0 && (s.gib > 0 || s.punct > 0)){
         showStatus('Still looks garbled — try a different source encoding from the dropdown above.', 'err');
-      } else if (s.heb > 0){
+      } else if (s.letters > 0){
         showStatus('✓ Hebrew recovered. Download a clean copy below.', 'ok');
       }
     } catch(e){
@@ -514,15 +588,18 @@
     originalName = file.name.replace(/\.[^.]+$/, '');
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     isExcel = (ext === 'xlsx' || ext === 'xls');
+    // clear any previous result and show the spinner right away (covers the file read too)
+    hideStatus();
+    preview.classList.remove('show');
+    actions.classList.remove('show');
+    showLoading();
     const reader = new FileReader();
     reader.onload = e => {
       rawBytes = new Uint8Array(e.target.result);
       controls.classList.toggle('show', !isExcel); // encoding controls only matter for text files
-      if (isExcel) controls.classList.add('show'); // keep delimiter hidden but show nothing extra — actually hide
-      controls.classList.toggle('show', !isExcel);
-      process();
+      runProcess();
     };
-    reader.onerror = () => showStatus('Could not read the file.', 'err');
+    reader.onerror = () => { hideLoading(); showStatus('Could not read the file.', 'err'); };
     reader.readAsArrayBuffer(file);
   }
 
@@ -564,13 +641,13 @@
   $('reset').addEventListener('click', () => {
     rawBytes = null; currentRows = []; originalName=''; fileInput.value='';
     preview.classList.remove('show'); actions.classList.remove('show');
-    controls.classList.remove('show'); hideStatus();
+    controls.classList.remove('show'); hideStatus(); hideLoading();
     detectedBadge.textContent=''; table.innerHTML='';
   });
 
   // re-process when user changes encoding / delimiter
-  encSel.addEventListener('change', process);
-  delimSel.addEventListener('change', process);
+  encSel.addEventListener('change', runProcess);
+  delimSel.addEventListener('change', runProcess);
 
   // ---- Drag & drop wiring ----
   drop.addEventListener('click', () => fileInput.click());
