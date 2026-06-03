@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>מתקן קידוד עברית · Hebrew Encoding Fixer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -274,6 +275,114 @@
     color: var(--teal);
   }
 
+  /* Batch bar */
+  .batchbar {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.85rem 1.1rem;
+    border-radius: 3px;
+    margin-bottom: 1.3rem;
+    box-shadow: 6px 6px 0 var(--shadow);
+  }
+  .batchbar.show { display: flex; animation: pop 0.35s ease both; }
+  .batch-summary {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    direction: ltr;
+  }
+  .batch-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .batch-actions button {
+    font-family: 'Heebo', sans-serif;
+    font-weight: 700;
+    font-size: 0.9rem;
+    padding: 0.55rem 1.1rem;
+    border: 2px solid var(--paper);
+    border-radius: 3px;
+    cursor: pointer;
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.35);
+    transition: all 0.15s ease;
+  }
+  .batch-actions button:hover { transform: translate(-1px,-1px); box-shadow: 4px 4px 0 rgba(0,0,0,0.35); }
+  .batch-actions button:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 rgba(0,0,0,0.35); }
+  .batch-actions button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: 3px 3px 0 rgba(0,0,0,0.35); }
+  #dl-zip-all { background: var(--rust); color: #fff; }
+  #clear-all { background: transparent; color: var(--paper); }
+
+  /* File cards */
+  .filelist { display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1.5rem; }
+  .filecard {
+    background: #fff;
+    border: 2px solid var(--ink);
+    border-radius: 3px;
+    box-shadow: 5px 5px 0 var(--shadow);
+    overflow: hidden;
+    animation: pop 0.3s ease both;
+  }
+  .fc-head {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.8rem 1rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .fc-head:hover { background: rgba(13,27,42,0.035); }
+  .fc-toggle { font-size: 0.8rem; color: var(--rust); width: 0.9rem; flex: 0 0 auto; }
+  .fc-name {
+    font-weight: 700;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: ltr;
+    text-align: left;
+  }
+  .fc-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
+    background: var(--gold);
+    color: var(--ink);
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    flex: 0 0 auto;
+    direction: ltr;
+    white-space: nowrap;
+  }
+  .fc-badge:empty { display: none; }
+  .fc-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    flex: 0 0 auto;
+    direction: ltr;
+    white-space: nowrap;
+  }
+  .fc-status.ok { color: var(--teal); }
+  .fc-status.garbled, .fc-status.error { color: var(--rust-deep); }
+  .fc-status.queued, .fc-status.working { color: rgba(13,27,42,0.45); }
+  .fc-body { display: none; border-top: 1px solid var(--line); padding: 1rem; }
+  .filecard.expanded .fc-body { display: block; }
+  .fc-controls { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .fc-field {
+    flex: 1; min-width: 180px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--teal); display: block;
+  }
+  .fc-field select {
+    display: block; width: 100%; margin-top: 0.35rem;
+    font-family: 'Heebo', sans-serif; font-size: 0.9rem; text-transform: none; letter-spacing: 0;
+    padding: 0.55rem 0.7rem; border: 2px solid var(--ink); border-radius: 3px; background: #fff; cursor: pointer;
+  }
+  .fc-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1rem; }
+  .fc-actions .btn { flex: 0 1 auto; min-width: 130px; font-size: 0.9rem; padding: 0.6rem 1rem; box-shadow: 3px 3px 0 var(--ink); }
+
   footer {
     margin-top: 3rem;
     text-align: center;
@@ -299,34 +408,9 @@
 
   <div class="drop" id="drop">
     <div class="drop-icon">⇩</div>
-    <div class="drop-main">גררו לכאן קובץ · או לחצו לבחירה</div>
-    <div class="drop-sub">.csv · .xlsx · .xls · .txt</div>
-    <input type="file" id="file" accept=".csv,.xlsx,.xls,.txt,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-  </div>
-
-  <div class="controls" id="controls">
-    <div class="field">
-      <label>קידוד מקור — Source encoding</label>
-      <select id="encoding">
-        <option value="auto">זיהוי אוטומטי · Auto-detect</option>
-        <option value="windows-1255">Windows-1255 (Hebrew)</option>
-        <option value="ISO-8859-8">ISO-8859-8 (Hebrew)</option>
-        <option value="utf-8">UTF-8</option>
-        <option value="utf-8-as-1252">UTF-8 קרא כ-Windows-1252 (mojibake)</option>
-        <option value="utf-8-as-1255">UTF-8 קרא כ-Windows-1255</option>
-        <option value="cp862">CP862 (DOS Hebrew)</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>מפריד CSV — Delimiter</label>
-      <select id="delimiter">
-        <option value="auto">זיהוי אוטומטי · Auto</option>
-        <option value=",">פסיק ( , )</option>
-        <option value=";">נקודה-פסיק ( ; )</option>
-        <option value="\t">טאב ( Tab )</option>
-        <option value="|">קו אנכי ( | )</option>
-      </select>
-    </div>
+    <div class="drop-main">גררו לכאן קבצים · או לחצו לבחירה</div>
+    <div class="drop-sub">קובץ אחד או כמה · .csv · .xlsx · .xls · .txt</div>
+    <input type="file" id="file" multiple accept=".csv,.xlsx,.xls,.txt,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
   </div>
 
   <div class="loading" id="loading">
@@ -334,19 +418,15 @@
     <div class="loading-text">מפענח את הקובץ… · Decoding file</div>
   </div>
 
-  <div class="preview" id="preview">
-    <div class="preview-head">
-      <span id="preview-info">PREVIEW</span>
-      <span class="badge" id="detected-badge"></span>
-    </div>
-    <div class="table-scroll"><table id="table"></table></div>
+  <div class="batchbar" id="batchbar">
+    <span class="batch-summary" id="batch-summary"></span>
+    <span class="batch-actions">
+      <button id="dl-zip-all">⤓ הורד הכל · ZIP של CSV</button>
+      <button id="clear-all">נקה הכל</button>
+    </span>
   </div>
 
-  <div class="actions" id="actions">
-    <button class="btn btn-csv" id="dl-csv">⤓ הורד CSV נקי (UTF-8)</button>
-    <button class="btn btn-xlsx" id="dl-xlsx">⤓ הורד Excel (.xlsx)</button>
-    <button class="btn btn-reset" id="reset">נקה</button>
-  </div>
+  <div class="filelist" id="filelist"></div>
 
   <div class="status" id="status"></div>
 
@@ -358,17 +438,32 @@
 <script>
 (function(){
   const $ = id => document.getElementById(id);
-  const drop = $('drop'), fileInput = $('file'), controls = $('controls'),
-        preview = $('preview'), actions = $('actions'), status = $('status'),
-        table = $('table'), encSel = $('encoding'), delimSel = $('delimiter'),
-        detectedBadge = $('detected-badge'), previewInfo = $('preview-info'),
-        loading = $('loading');
+  const drop = $('drop'), fileInput = $('file'), status = $('status'),
+        loading = $('loading'), loadingText = loading.querySelector('.loading-text'),
+        batchbar = $('batchbar'), summaryEl = $('batch-summary'),
+        filelist = $('filelist'), dlZipBtn = $('dl-zip-all'), clearBtn = $('clear-all');
 
-  let rawBytes = null;       // Uint8Array of original file
-  let originalName = '';
-  let isExcel = false;
-  let currentRows = [];      // parsed 2D array
-  let workbookSheet = null;  // for xlsx-origin files
+  // Each dropped file becomes an item we decode independently.
+  let items = [];   // { id, file, name, baseName, ext, isExcel, bytes, rows, encName,
+                    //   encChoice, delimChoice, status, message, expanded, el }
+  let idSeq = 0, processing = false;
+
+  // <option> markup reused for every file's encoding / delimiter pickers.
+  // ('\\t' so the rendered attribute is the literal string \t that parseCSV expects.)
+  const ENC_OPTS =
+    '<option value="auto">זיהוי אוטומטי · Auto-detect</option>' +
+    '<option value="windows-1255">Windows-1255 (Hebrew)</option>' +
+    '<option value="ISO-8859-8">ISO-8859-8 (Hebrew)</option>' +
+    '<option value="utf-8">UTF-8</option>' +
+    '<option value="utf-8-as-1252">UTF-8 קרא כ-Windows-1252 (mojibake)</option>' +
+    '<option value="utf-8-as-1255">UTF-8 קרא כ-Windows-1255</option>' +
+    '<option value="cp862">CP862 (DOS Hebrew)</option>';
+  const DELIM_OPTS =
+    '<option value="auto">זיהוי אוטומטי · Auto</option>' +
+    '<option value=",">פסיק ( , )</option>' +
+    '<option value=";">נקודה-פסיק ( ; )</option>' +
+    '<option value="\\t">טאב ( Tab )</option>' +
+    '<option value="|">קו אנכי ( | )</option>';
 
   // ---- Hebrew detection heuristics ----
   // Hebrew Unicode block: U+0590–U+05FF
@@ -525,12 +620,12 @@
   }
 
   // ---- Render ----
-  function renderTable(rows){
+  // Build a 50-row preview into the given <table>, returning a short summary string.
+  function renderTableInto(table, rows){
     table.innerHTML = '';
-    if (!rows.length){ return; }
+    if (!rows.length) return 'empty';
     const maxRows = 50;
-    const thead = document.createElement('thead');
-    const htr = document.createElement('tr');
+    const thead = document.createElement('thead'), htr = document.createElement('tr');
     rows[0].forEach(h => { const th = document.createElement('th'); th.textContent = h; htr.appendChild(th); });
     thead.appendChild(htr); table.appendChild(thead);
     const tbody = document.createElement('tbody');
@@ -540,83 +635,159 @@
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    previewInfo.textContent = `PREVIEW · ${rows.length} rows × ${rows[0].length} cols` + (rows.length>maxRows ? ` (showing ${maxRows})` : '');
+    return `${rows.length} rows × ${rows[0].length} cols` + (rows.length>maxRows ? ` (showing ${maxRows})` : '');
   }
 
-  function showStatus(msg, type){
-    status.textContent = msg;
-    status.className = 'status show ' + (type||'ok');
-  }
+  function showStatus(msg, type){ status.textContent = msg; status.className = 'status show ' + (type||'ok'); }
   function hideStatus(){ status.className = 'status'; }
-  function showLoading(){ loading.classList.add('show'); }
+  function setLoading(msg){ if (loadingText) loadingText.textContent = msg; loading.classList.add('show'); }
   function hideLoading(){ loading.classList.remove('show'); }
-  // Show the spinner, let the browser paint one frame, THEN run the synchronous
-  // decode/parse so the UI shows feedback instead of freezing on large files.
-  function runProcess(){
-    if (!rawBytes) return;
-    showLoading();
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      try { process(); } finally { hideLoading(); }
-    }));
+  // Resolve after the browser has painted a frame — lets the spinner / progress show
+  // before a synchronous decode blocks the main thread.
+  const paint = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  function readFileBytes(file){
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(new Uint8Array(e.target.result));
+      reader.onerror = () => reject(new Error('could not read file'));
+      reader.readAsArrayBuffer(file);
+    });
   }
 
-  // ---- Main processing ----
-  function process(){
-    if (!rawBytes) return;
-    hideStatus();
-    try {
-      if (isExcel){
-        // Excel files store text internally; encoding issues are rare, but we re-read fresh.
-        const wb = XLSX.read(rawBytes, { type:'array' });
-        const first = wb.SheetNames[0];
-        workbookSheet = wb.Sheets[first];
-        currentRows = XLSX.utils.sheet_to_json(workbookSheet, { header:1, defval:'', raw:false });
-        detectedBadge.textContent = 'XLSX · ' + first;
-      } else {
-        const choice = encSel.value;
-        const decoded = manualDecode(rawBytes, choice);
-        if (!decoded || decoded.str === null){
-          showStatus('Could not decode with the chosen encoding. Try another option.', 'err');
-          return;
-        }
-        currentRows = parseCSV(decoded.str, delimSel.value);
-        detectedBadge.textContent = (choice === 'auto' ? 'AUTO → ' : '') + decoded.name;
-      }
-      renderTable(currentRows);
-      preview.classList.add('show');
-      actions.classList.add('show');
+  // ---- Per-file decode ----
+  // Decode + parse one item from its raw bytes, recording rows / encoding / status.
+  function decodeItem(it){
+    if (it.isExcel){
+      const wb = XLSX.read(it.bytes, { type:'array' });
+      const first = wb.SheetNames[0];
+      it.rows = XLSX.utils.sheet_to_json(wb.Sheets[first], { header:1, defval:'', raw:false });
+      it.encName = 'XLSX · ' + first;
+    } else {
+      const decoded = manualDecode(it.bytes, it.encChoice);
+      if (!decoded || decoded.str === null){ it.rows = []; it.status = 'error'; it.message = 'could not decode'; return; }
+      it.rows = parseCSV(decoded.str, it.delimChoice);
+      it.encName = (it.encChoice === 'auto' ? 'AUTO → ' : '') + decoded.name;
+    }
+    // sanity check (sample of rows): did we actually recover Hebrew?
+    const s = hebrewScore(it.rows.slice(0, 2000).flat().join(''));
+    it.status = (s.letters === 0 && (s.gib > 0 || s.punct > 0)) ? 'garbled' : 'ok';
+    it.message = '';
+  }
 
-      // sanity check (sample of rows): did we actually recover Hebrew?
-      const flat = currentRows.slice(0, 2000).flat().join('');
-      const s = hebrewScore(flat);
-      if (s.letters === 0 && (s.gib > 0 || s.punct > 0)){
-        showStatus('Still looks garbled — try a different source encoding from the dropdown above.', 'err');
-      } else if (s.letters > 0){
-        showStatus('✓ Hebrew recovered. Download a clean copy below.', 'ok');
-      }
-    } catch(e){
-      showStatus('Error: ' + e.message, 'err');
+  // ---- File cards (compact list, click a row to expand its preview) ----
+  function makeCard(it){
+    const el = document.createElement('div');
+    el.className = 'filecard';
+    el.innerHTML =
+      '<div class="fc-head">' +
+        '<span class="fc-toggle">▸</span>' +
+        '<span class="fc-name"></span>' +
+        '<span class="fc-badge"></span>' +
+        '<span class="fc-status queued">⋯</span>' +
+      '</div>' +
+      '<div class="fc-body">' +
+        '<div class="fc-controls">' +
+          '<label class="fc-field">קידוד · Encoding<select class="fc-enc">' + ENC_OPTS + '</select></label>' +
+          '<label class="fc-field">מפריד · Delimiter<select class="fc-delim">' + DELIM_OPTS + '</select></label>' +
+        '</div>' +
+        '<div class="table-scroll"><table class="fc-table"></table></div>' +
+        '<div class="fc-actions">' +
+          '<button class="btn btn-csv fc-dl-csv">⤓ CSV נקי</button>' +
+          '<button class="btn btn-xlsx fc-dl-xlsx">⤓ Excel</button>' +
+        '</div>' +
+      '</div>';
+    it.el = el;
+    el.querySelector('.fc-head').addEventListener('click', () => setExpanded(it, !it.expanded));
+    el.querySelector('.fc-enc').addEventListener('change', e => { it.encChoice = e.target.value; redecode(it); });
+    el.querySelector('.fc-delim').addEventListener('change', e => { it.delimChoice = e.target.value; redecode(it); });
+    el.querySelector('.fc-dl-csv').addEventListener('click', () => downloadItemCSV(it));
+    el.querySelector('.fc-dl-xlsx').addEventListener('click', () => downloadItemXLSX(it));
+    return el;
+  }
+  function updateCard(it){
+    const el = it.el; if (!el) return;
+    el.querySelector('.fc-name').textContent = it.name;
+    el.querySelector('.fc-badge').textContent = it.encName || '';
+    const rows = it.rows ? it.rows.length : 0, cols = (it.rows && it.rows[0]) ? it.rows[0].length : 0;
+    const st = el.querySelector('.fc-status');
+    st.className = 'fc-status ' + it.status;
+    st.textContent =
+      it.status === 'ok'      ? `✓ ${rows.toLocaleString()} × ${cols}` :
+      it.status === 'garbled' ? '⚠ עדיין ג׳יבריש' :
+      it.status === 'error'   ? '✕ ' + (it.message || 'error') :
+      it.status === 'working' ? '⋯ מפענח' : '⋯ ממתין';
+    el.classList.toggle('expanded', !!it.expanded);
+    el.querySelector('.fc-toggle').textContent = it.expanded ? '▾' : '▸';
+    el.querySelector('.fc-controls').style.display = it.isExcel ? 'none' : '';
+    if (it.expanded){
+      renderTableInto(el.querySelector('.fc-table'), it.rows || []);
+      el.querySelector('.fc-enc').value = it.encChoice;
+      el.querySelector('.fc-delim').value = it.delimChoice;
     }
   }
+  function setExpanded(it, val){ it.expanded = val; updateCard(it); }
+  function redecode(it){
+    setLoading('מפענח מחדש · Re-decoding…');
+    paint().then(() => {
+      try { decodeItem(it); } catch(e){ it.status = 'error'; it.message = e.message; }
+      updateCard(it); updateSummary(); hideLoading();
+    });
+  }
 
-  // ---- File intake ----
-  function handleFile(file){
-    originalName = file.name.replace(/\.[^.]+$/, '');
-    const ext = (file.name.split('.').pop() || '').toLowerCase();
-    isExcel = (ext === 'xlsx' || ext === 'xls');
-    // clear any previous result and show the spinner right away (covers the file read too)
+  // ---- Intake + sequential queue ----
+  function addFiles(fileList){
+    const arr = Array.from(fileList || []);
+    if (!arr.length) return;
     hideStatus();
-    preview.classList.remove('show');
-    actions.classList.remove('show');
-    showLoading();
-    const reader = new FileReader();
-    reader.onload = e => {
-      rawBytes = new Uint8Array(e.target.result);
-      controls.classList.toggle('show', !isExcel); // encoding controls only matter for text files
-      runProcess();
-    };
-    reader.onerror = () => { hideLoading(); showStatus('Could not read the file.', 'err'); };
-    reader.readAsArrayBuffer(file);
+    for (const file of arr){
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const it = {
+        id: ++idSeq, file, name: file.name,
+        baseName: file.name.replace(/\.[^.]+$/, ''), ext,
+        isExcel: (ext === 'xlsx' || ext === 'xls'),
+        bytes: null, rows: null, encName: '',
+        encChoice: 'auto', delimChoice: 'auto',
+        status: 'queued', message: '', expanded: false, el: null
+      };
+      items.push(it);
+      filelist.appendChild(makeCard(it));
+      updateCard(it);
+    }
+    batchbar.classList.add('show');
+    updateSummary();
+    processQueue();
+  }
+  // Process queued files one at a time so memory stays bounded even with big files.
+  async function processQueue(){
+    if (processing) return;
+    processing = true;
+    let it;
+    while ((it = items.find(x => x.status === 'queued'))){
+      const done = items.filter(x => x.status !== 'queued').length + 1;
+      setLoading(`מעבד · Processing ${done} / ${items.length}`);
+      it.status = 'working'; updateCard(it);
+      await paint();
+      try {
+        if (!it.bytes) it.bytes = await readFileBytes(it.file);
+        decodeItem(it);
+      } catch(e){ it.status = 'error'; it.message = e.message || 'error'; }
+      updateCard(it); updateSummary();
+    }
+    processing = false;
+    hideLoading();
+    if (items.length === 1 && items[0].status !== 'error') setExpanded(items[0], true); // auto-open a lone file
+  }
+  function updateSummary(){
+    const n = items.length;
+    const ok = items.filter(i => i.status === 'ok').length;
+    const bad = items.filter(i => i.status === 'garbled' || i.status === 'error').length;
+    summaryEl.textContent = `${n} ${n === 1 ? 'file' : 'files'} · ${ok} recovered` + (bad ? ` · ${bad} need a look` : '');
+    dlZipBtn.disabled = !items.some(i => i.rows && i.rows.length);
+  }
+  function clearAll(){
+    items = []; idSeq = 0; processing = false;
+    filelist.innerHTML = ''; batchbar.classList.remove('show');
+    hideStatus(); hideLoading(); fileInput.value = '';
   }
 
   // ---- Downloads ----
@@ -636,38 +807,47 @@
     document.body.removeChild(a);
     setTimeout(()=>URL.revokeObjectURL(url), 1000);
   }
-
-  $('dl-csv').addEventListener('click', () => {
-    if (!currentRows.length) return;
-    const csv = buildCSV(currentRows);
-    // UTF-8 BOM so Excel opens Hebrew correctly
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + csv], { type:'text/csv;charset=utf-8;' });
-    downloadBlob(blob, originalName + '_fixed.csv');
-  });
-
-  $('dl-xlsx').addEventListener('click', () => {
-    if (!currentRows.length) return;
-    const ws = XLSX.utils.aoa_to_sheet(currentRows);
+  function downloadItemCSV(it){
+    if (!it.rows || !it.rows.length) return;
+    const blob = new Blob(['\uFEFF' + buildCSV(it.rows)], { type:'text/csv;charset=utf-8;' }); // BOM \u2192 Excel reads Hebrew
+    downloadBlob(blob, it.baseName + '_fixed.csv');
+  }
+  function downloadItemXLSX(it){
+    if (!it.rows || !it.rows.length) return;
+    const ws = XLSX.utils.aoa_to_sheet(it.rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    XLSX.writeFile(wb, originalName + '_fixed.xlsx');
-  });
+    XLSX.writeFile(wb, it.baseName + '_fixed.xlsx');
+  }
+  // Bundle every successfully-decoded file into one ZIP of clean UTF-8 CSVs.
+  async function downloadAllZip(){
+    const ready = items.filter(i => i.rows && i.rows.length);
+    if (!ready.length) return;
+    if (typeof JSZip === 'undefined'){ showStatus('ZIP library did not load (offline?). Use the per-file buttons inside each card instead.', 'err'); return; }
+    setLoading('\u05D9\u05D5\u05E6\u05E8 ZIP \u00B7 Building ZIP\u2026');
+    await paint();
+    try {
+      const zip = new JSZip(), used = new Set();
+      for (const it of ready){
+        let name = it.baseName + '_fixed.csv', k = 1;
+        while (used.has(name)) name = `${it.baseName}_fixed_${k++}.csv`;   // de-dupe identical names
+        used.add(name);
+        zip.file(name, '\uFEFF' + buildCSV(it.rows));
+      }
+      const blob = await zip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level:6 } });
+      downloadBlob(blob, `hebrew_fixed_${new Date().toISOString().slice(0,10)}.zip`);
+      showStatus(`\u2713 ${ready.length} ${ready.length === 1 ? 'file' : 'files'} zipped.`, 'ok');
+    } catch(e){
+      showStatus('Error building ZIP: ' + e.message, 'err');
+    } finally { hideLoading(); }
+  }
 
-  $('reset').addEventListener('click', () => {
-    rawBytes = null; currentRows = []; originalName=''; fileInput.value='';
-    preview.classList.remove('show'); actions.classList.remove('show');
-    controls.classList.remove('show'); hideStatus(); hideLoading();
-    detectedBadge.textContent=''; table.innerHTML='';
-  });
+  dlZipBtn.addEventListener('click', downloadAllZip);
+  clearBtn.addEventListener('click', clearAll);
 
-  // re-process when user changes encoding / delimiter
-  encSel.addEventListener('change', runProcess);
-  delimSel.addEventListener('change', runProcess);
-
-  // ---- Drag & drop wiring ----
+  // ---- Drag & drop wiring (multiple files) ----
   drop.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  fileInput.addEventListener('change', e => { addFiles(e.target.files); fileInput.value = ''; });
 
   ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
     e.preventDefault(); e.stopPropagation(); drop.classList.add('over');
@@ -677,10 +857,7 @@
     if (ev === 'dragleave' && drop.contains(e.relatedTarget)) return;
     drop.classList.remove('over');
   }));
-  drop.addEventListener('drop', e => {
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
-  });
+  drop.addEventListener('drop', e => { if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
 
   // prevent browser opening file on accidental drop outside zone
   window.addEventListener('dragover', e => e.preventDefault());
